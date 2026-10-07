@@ -984,11 +984,6 @@ a { text-decoration: none; color: inherit; }
 }
 
 /* Hospital-wide controls, in the original visual style. */
-.unit-control { margin-top:.6rem; }
-.unit-control label { display:block; color:var(--gold); font-weight:700; font-size:.75rem; letter-spacing:.1em; margin-bottom:.4rem; }
-#departmentSelect { width:100%; min-height:42px; padding:.6rem .8rem; border-radius:12px; border:1px solid var(--gold-border); background:#102017; color:var(--text-1); font:600 1rem var(--font-display); }
-#departmentSelect:disabled { opacity:.5; }
-
 [hidden] { display: none !important; }
 .logo-mark svg { width: 100%; height: 100%; }
 .brand-text h1 { letter-spacing: .09em; line-height: 1.25; }
@@ -1060,8 +1055,6 @@ a { text-decoration: none; color: inherit; }
       <option value="kacold">KACOLD</option>
       <option value="east">East Wing</option>
     </select>
-    <div class="unit-control"><label for="departmentSelect">YOUR DEPARTMENT</label>
-    <select id="departmentSelect" aria-describedby="savedHint"><option value="">Select a building first</option></select></div>
     <label class="scope-toggle"><input type="checkbox" id="searchAll"> Search all buildings</label>
   </section>
   <div class="data-notice" id="dataNotice" role="status" hidden></div>
@@ -1116,7 +1109,6 @@ const KEY_DATA = 'hospital_directory_data_v1';
 const KEY_FAV = 'hospital_directory_favorites_v1';
 const KEY_SIZE = 'hospital_directory_text_size_v1';
 const KEY_BUILDING = 'hospital_directory_building_v1';
-const KEY_DEPARTMENTS = 'hospital_directory_departments_v1';
 const LABELS = { all:'All buildings', main:'Main Hospital', kacold:'KACOLD', east:'East Wing', shared:'Shared · All buildings', unassigned:'Building not set' };
 const $ = id => document.getElementById(id);
 let storageOK = true;
@@ -1137,15 +1129,6 @@ function buildingValues(value) {
   if (!mapped.length || mapped.includes('unassigned')) return ['unassigned'];
   return mapped.includes('shared') ? ['shared'] : [...new Set(mapped)].sort();
 }
-function visibilityScope(raw, buildings, department, room) {
-  const values={hospital:'hospital',shared:'hospital',all:'hospital','المستشفى كامل':'hospital',building:'building','المبنى كامل':'building',department:'department',unit:'department','القسم فقط':'department'};
-  const text=normalizeSearch(raw); let scope=text ? (values[text]||'unassigned') : (department||room ? 'department' : buildings.includes('shared')?'hospital':buildings.includes('unassigned')?'unassigned':'building');
-  // Never broaden a room or department entry to building/hospital scope.
-  if((department||room)&&scope!=='department')return 'unassigned';
-  if(scope==='department'&&(!department||buildings.length!==1||['shared','unassigned'].includes(buildings[0])))return 'unassigned';
-  if(scope==='building'&&(buildings.includes('unassigned')||buildings.includes('shared')))return 'unassigned';
-  return scope;
-}
 function normalizeRows(rows) {
   if (!Array.isArray(rows)) throw new Error('The data service did not return a directory.');
   const clean=[];
@@ -1155,63 +1138,33 @@ function normalizeRows(rows) {
     if(!service && !extension) continue;
     if(!service || !extension) throw new Error('A directory entry is missing its service or extension.');
     const building=String(r.building??'').trim();
-    const buildings=buildingValues(building),department=String(r.department??r.unit??'').trim(),room=String(r.room??'').trim();
-    const scope=visibilityScope(r.scope??'',buildings,department,room);
-    clean.push({id:String(r.id??'').trim(), category:String(r.category??'General').trim()||'General', service, extension, building, aliases:String(r.aliases??'').trim(), buildings, department, room, scope});
+    clean.push({id:String(r.id??'').trim(), category:String(r.category??'General').trim()||'General', service, extension, building, aliases:String(r.aliases??'').trim(), buildings:buildingValues(building)});
   }
   const seen = new Set();
-  return clean.filter(r=>{const k=JSON.stringify([r.id,r.category,r.service,r.extension,r.buildings,r.department,r.room,r.scope]);if(seen.has(k))return false;seen.add(k);return true;});
+  return clean.filter(r=>{const k=JSON.stringify([r.id,r.category,r.service,r.extension,r.buildings]);if(seen.has(k))return false;seen.add(k);return true;});
 }
 let data=[], favorites=new Set(), currentView='all', categoryFilter=null, queryString='', baseSize=11;
 let selectedBuilding=readStorage(KEY_BUILDING)||'all';
 if(!['all','main','kacold','east'].includes(selectedBuilding)) selectedBuilding='all';
-let departmentPreferences=parseJSON(readStorage(KEY_DEPARTMENTS),{});
-if(!departmentPreferences||typeof departmentPreferences!=='object'||Array.isArray(departmentPreferences))departmentPreferences={};
-let selectedDepartment=typeof departmentPreferences[selectedBuilding]==='string'?departmentPreferences[selectedBuilding]:'';
 let loadState='loading', lastUpdated=0, requestToken=0, activeRequest=null, retryTimer=null;
 const listEl=$('list'), searchEl=$('search'), searchWrap=$('searchWrap'), livePill=$('livePill'), settingsPop=$('settingsPop');
-function locationLabel(r) {
-  const parts=[r.scope==='hospital'?LABELS.shared:r.buildings.map(b=>LABELS[b]).join(' · ')];
-  if(r.department)parts.push(r.department);
-  if(r.room)parts.push('Room '+r.room);
-  if(r.scope==='unassigned'&&!r.buildings.includes('unassigned'))parts.push('Location needs review');
-  return parts.join(' · ');
-}
-function makeKey(r) { return r.id ? 'id:'+r.id : JSON.stringify([r.category,r.service,r.extension,r.buildings,...(r.department||r.room?[r.department,r.room]:[])]); }
+function locationLabel(r) { return r.buildings.map(b=>LABELS[b]).join(' · '); }
+function makeKey(r) { return r.id ? 'id:'+r.id : JSON.stringify([r.category,r.service,r.extension,r.buildings]); }
 function oldKey(r) { return r.category+'|'+r.service+'|'+r.extension; }
 function migrateFavorites() {
   let changed=false;
   for(const r of data){const old=oldKey(r);if(favorites.has(old) && data.filter(x=>oldKey(x)===old).length===1){favorites.delete(old);favorites.add(makeKey(r));changed=true;}}
   if(changed)writeStorage(KEY_FAV,JSON.stringify([...favorites]));
 }
-function matchesBuilding(r, building=selectedBuilding, department=selectedDepartment) {
-  if(building==='all')return true;
-  if(r.scope==='unassigned')return false;
-  if(r.scope==='hospital')return true;
-  if(!r.buildings.includes(building))return false;
-  if(r.scope==='building')return true;
-  return !department||normalizeSearch(r.department)===normalizeSearch(department);
-}
-function scopedRows() { const across=queryString && $('searchAll').checked; return data.filter(r=>matchesBuilding(r,across?'all':selectedBuilding,across?'':selectedDepartment)); }
-function syncDepartmentControls(){
-  const select=$('departmentSelect');select.disabled=selectedBuilding==='all';
-  if(select.disabled){select.innerHTML='<option value="">Select a building first</option>';return;}
-  const names=new Map();
-  for(const r of data)if(r.scope==='department'&&r.buildings.includes(selectedBuilding))names.set(normalizeSearch(r.department),r.department);
-  const saved=normalizeSearch(selectedDepartment);
-  if(saved&&!names.has(saved))names.set(saved,selectedDepartment);
-  select.innerHTML='<option value="">All departments</option>'+[...names].sort((a,b)=>a[1].localeCompare(b[1],undefined,{numeric:true})).map(([key,name])=>'<option value="'+escapeHtml(key)+'">'+escapeHtml(name)+'</option>').join('');
-  select.value=saved;
-}
-
+function matchesBuilding(r, scope=selectedBuilding) { return scope==='all'||r.buildings.includes('shared')||r.buildings.includes(scope); }
+function scopedRows() { const across=queryString && $('searchAll').checked; return data.filter(r=>matchesBuilding(r,across?'all':selectedBuilding)); }
 let toastTimer;
 function showToast(msg,ok=true){$('toast').innerHTML='<span class="toast-icon'+(ok?'':' error')+'">'+(ok?'✓':'✕')+'</span><span>'+escapeHtml(msg)+'</span>';$('toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('show'),2800);}
 function syncBuildingControls(){
   $('buildingSelect').value=selectedBuilding;
-  syncDepartmentControls();
   $('searchAll').disabled=selectedBuilding==='all';
   $('savedHint').textContent=storageOK?'Saved on this device':'Saving unavailable in this browser';
-  searchEl.placeholder=selectedBuilding==='all'?'Search service, category or extension…':'Search '+(selectedDepartment?$('departmentSelect').selectedOptions[0].textContent+' · ':'')+LABELS[selectedBuilding]+'…';
+  searchEl.placeholder=selectedBuilding==='all'?'Search service, category or extension…':'Search '+LABELS[selectedBuilding]+'…';
 }
 function renderStatus(){
   livePill.classList.toggle('syncing',loadState==='loading');
@@ -1220,14 +1173,14 @@ function renderStatus(){
   const messages=[];
   if(loadState==='error') messages.push(data.length?'Update failed. Showing saved data'+(lastUpdated?' from '+new Date(lastUpdated).toLocaleString():'')+'.':'Could not load the directory. Check your connection and try again.');
   else if(loadState==='loading'&&data.length)messages.push('Showing saved data while checking for updates.');
-  const n=data.filter(r=>r.scope==='unassigned').length;
-  if(n)messages.push(n+(n===1?' entry has':' entries have')+' no complete location listed'+(selectedBuilding==='all'?'.':'; find them in All buildings.'));
+  const n=data.filter(r=>r.buildings.includes('unassigned')).length;
+  if(n)messages.push(n+(n===1?' entry has':' entries have')+' no building listed'+(selectedBuilding==='all'?'.':'; find them in All buildings.'));
   $('dataNotice').hidden=!messages.length;
   $('dataNotice').textContent=messages.join(' ');
   if(loadState==='error'){const b=document.createElement('button');b.textContent='Retry';b.addEventListener('click',()=>fetchData());$('dataNotice').append(' ',b);}
 }
 function renderRRT(){
-  const rows=data.filter(r=>matchesBuilding(r)&&r.scope!=='unassigned'&&/\brrt\b/i.test(r.category+' '+r.service));
+  const rows=data.filter(r=>matchesBuilding(r)&&!r.buildings.includes('unassigned')&&/\brrt\b/i.test(r.category+' '+r.service));
   $('rrtBar').hidden=!rows.length;
   $('rrtBar').innerHTML=rows.length?'<span class="rrt-pulse" aria-hidden="true"></span><span class="rrt-label">RRT</span><div class="rrt-numbers">'+rows.map(r=>'<span class="rrt-call"><span class="rrt-call-label">'+escapeHtml(r.service)+' · '+escapeHtml(locationLabel(r))+'</span><span class="rrt-call-num">'+escapeHtml(r.extension)+'</span></span>').join('')+'</div>':'';
 }
@@ -1237,7 +1190,7 @@ function renderCategoryChips(){
   $('categoryRow').innerHTML=[null,...cats].map(c=>'<button class="cat-chip'+(categoryFilter===c?' active':'')+'" data-cat="'+escapeHtml(c??'')+'" aria-pressed="'+(categoryFilter===c)+'">'+escapeHtml(c??'All Categories')+'</button>').join('');
 }
 function render(){
-  syncDepartmentControls();renderStatus();renderRRT();renderCategoryChips();
+  renderStatus();renderRRT();renderCategoryChips();
   const rows=scopedRows();
   $('countAll').textContent=rows.length;
   $('countFav').textContent=rows.filter(r=>favorites.has(makeKey(r))).length;
@@ -1247,7 +1200,7 @@ function render(){
   const list=rows.filter(r=>{
     if(currentView==='fav'&&!favorites.has(makeKey(r)))return false;
     if(categoryFilter!==null&&r.category!==categoryFilter)return false;
-    const text=normalizeSearch([r.category,r.service,r.extension,r.aliases,r.department,r.room,locationLabel(r)].join(' '));
+    const text=normalizeSearch([r.category,r.service,r.extension,r.aliases,locationLabel(r)].join(' '));
     return words.every(w=>text.includes(w));
   }).sort((a,b)=>a.category.localeCompare(b.category)||a.service.localeCompare(b.service)||locationLabel(a).localeCompare(locationLabel(b)));
   $('footerCount').textContent=list.length+' / '+rows.length;
@@ -1262,7 +1215,7 @@ function render(){
   const groups=!words.length&&categoryFilter===null;let last=null;const html=[];
   for(const r of list){if(groups&&last!==r.category){html.push('<div class="section-label">'+escapeHtml(r.category)+'</div>');last=r.category;}
     const fav=favorites.has(makeKey(r));
-    html.push('<div class="card"><button class="card-fav'+(fav?' active':'')+'" data-key="'+escapeHtml(makeKey(r))+'" aria-label="'+(fav?'Remove':'Add')+' favorite: '+escapeHtml(r.service)+'" aria-pressed="'+fav+'">★</button><div class="card-body"><div class="card-service">'+escapeHtml(r.service)+'</div>'+(groups?'':'<span class="card-category">'+escapeHtml(r.category)+'</span>')+'<span class="location-badge'+(r.scope==='unassigned'?' unassigned':'')+'">'+escapeHtml(locationLabel(r))+'</span></div><span class="card-ext">'+escapeHtml(r.extension)+'</span></div>');
+    html.push('<div class="card"><button class="card-fav'+(fav?' active':'')+'" data-key="'+escapeHtml(makeKey(r))+'" aria-label="'+(fav?'Remove':'Add')+' favorite: '+escapeHtml(r.service)+'" aria-pressed="'+fav+'">★</button><div class="card-body"><div class="card-service">'+escapeHtml(r.service)+'</div>'+(groups?'':'<span class="card-category">'+escapeHtml(r.category)+'</span>')+'<span class="location-badge'+(r.buildings.includes('unassigned')?' unassigned':'')+'">'+escapeHtml(locationLabel(r))+'</span></div><span class="card-ext">'+escapeHtml(r.extension)+'</span></div>');
   }
   listEl.innerHTML=html.join('');
 }
@@ -1292,8 +1245,7 @@ function fetchData(attempt=0){
 }
 // Supports the previous Apps Script, which always responds with callback([...]).
 window.callback=response=>{if(activeRequest && document.currentScript===activeRequest.script)activeRequest.accept(response);};
-$('buildingSelect').addEventListener('change',e=>{selectedBuilding=e.target.value;selectedDepartment=typeof departmentPreferences[selectedBuilding]==='string'?departmentPreferences[selectedBuilding]:'';categoryFilter=null;$('searchAll').checked=false;writeStorage(KEY_BUILDING,selectedBuilding);syncBuildingControls();render();listEl.scrollTop=0;});
-$('departmentSelect').addEventListener('change',e=>{selectedDepartment=e.target.value;departmentPreferences[selectedBuilding]=selectedDepartment;writeStorage(KEY_DEPARTMENTS,JSON.stringify(departmentPreferences));categoryFilter=null;$('searchAll').checked=false;syncBuildingControls();render();listEl.scrollTop=0;});
+$('buildingSelect').addEventListener('change',e=>{selectedBuilding=e.target.value;categoryFilter=null;$('searchAll').checked=false;writeStorage(KEY_BUILDING,selectedBuilding);syncBuildingControls();render();listEl.scrollTop=0;});
 $('searchAll').addEventListener('change',()=>{categoryFilter=null;render();});
 $('categoryRow').addEventListener('click',e=>{const b=e.target.closest('[data-cat]');if(b){categoryFilter=b.dataset.cat||null;render();}});
 listEl.addEventListener('click',e=>{if(e.target.closest('[data-action="retry"]')){fetchData();return;}const b=e.target.closest('[data-key]');if(!b)return;const key=b.dataset.key;if(favorites.has(key))favorites.delete(key);else favorites.add(key);if(!writeStorage(KEY_FAV,JSON.stringify([...favorites])))showToast('Favorites could not be saved on this device',false);render();});

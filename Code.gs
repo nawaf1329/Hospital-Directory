@@ -40,13 +40,10 @@ function readDirectory_() {
   const aliases = {
     id:['id','record id','المعرف'],
     category:['category','الفئة','التصنيف'],
-    service:['service','service name','name','الخدمة','اسم الخدمة'],
+    service:['service','service name','department','name','الخدمة','اسم الخدمة'],
     extension:['extension','ext','ext.','phone','التحويلة','الرقم'],
     building:['building','location','المبنى'],
-    aliases:['aliases','keywords','search terms','كلمات البحث'],
-    department:['department','unit','القسم'],
-    room:['room','room number','الغرفة','رقم الغرفة'],
-    scope:['scope','visibility','نطاق الظهور']
+    aliases:['aliases','keywords','search terms','كلمات البحث']
   };
   const indexes = {};
   Object.keys(aliases).forEach(key=>{
@@ -59,7 +56,7 @@ function readDirectory_() {
   for(let i=1;i<values.length;i++){
     const row=values[i];
     const get=key=>indexes[key]<0?'':String(row[indexes[key]]||'').trim();
-    const record={id:get('id'),category:get('category'),service:get('service'),extension:get('extension'),building:get('building'),aliases:get('aliases'),department:get('department'),room:get('room'),scope:get('scope')};
+    const record={id:get('id'),category:get('category'),service:get('service'),extension:get('extension'),building:get('building'),aliases:get('aliases')};
     if(!record.service&&!record.extension)continue;
     if(!record.service||!record.extension)throw new Error('Missing service or extension at row '+(i+1));
     if(record.id){if(ids.has(record.id))throw new Error('Duplicate record id at row '+(i+1));ids.add(record.id);}
