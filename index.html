@@ -981,7 +981,7 @@ a { text-decoration: none; color: inherit; }
 /* Hospital-wide controls, in the original visual style. */
 .unit-control { margin-top:.6rem; }
 .unit-control label { display:block; color:var(--gold); font-weight:700; font-size:.75rem; letter-spacing:.1em; margin-bottom:.4rem; }
-#departmentSelect { width:100%; min-height:42px; padding:.6rem .8rem; border-radius:12px; border:1px solid var(--gold-border); background:#102017; color:var(--text-1); font:600 1rem var(--font-display); }
+#buildingSelect, #departmentSelect { width:100%; min-height:42px; padding:.6rem .8rem; border-radius:12px; border:1px solid var(--gold-border); background:#102017; color:var(--text-1); font:600 1rem var(--font-display); }
 #departmentSelect:disabled { opacity:.5; }
 
 [hidden] { display: none !important; }
@@ -1017,6 +1017,7 @@ a { text-decoration: none; color: inherit; }
 .department-options{display:flex;gap:10px;margin-top:16px}.department-options button{flex:1;min-height:54px;border:1px solid var(--gold-border);border-radius:12px;background:#172318;color:#e1bd58;font-size:18px;font-weight:700;cursor:pointer;}
 .scope-heading{font-size:11px!important;padding-top:22px!important;color:#e1bd58!important;}
 #livePill[hidden], #dataNotice[hidden] { display:none !important; }
+.wing-heading{margin-top:10px;}
 </style>
 </head>
 <body>
@@ -1053,13 +1054,11 @@ a { text-decoration: none; color: inherit; }
 </div>
 
   <section class="building-panel" aria-label="Directory location">
-<section id="departmentWelcome" aria-labelledby="welcomeTitle">
-<h2 id="welcomeTitle">Choose a department</h2><p>We’ll remember your choice on this device.</p>
-<div class="department-options"><button data-department="A3">A3</button><button data-department="ER">ER</button><button data-department="L2">L2</button></div></section>
-<div class="building-heading"><label for="departmentSelect">DEPARTMENT</label><span id="savedHint" role="status">Saved on this device</span></div><div class="unit-control">
-    <select id="departmentSelect" aria-describedby="savedHint"><option value="">Choose a department</option></select></div>
-    <p class="scope-explanation">Selected department first, then hospital services.</p>
-  </section>
+<div class="building-heading"><label for="buildingSelect">BUILDING</label><span id="savedHint" role="status">Saved on this device</span></div>
+<select id="buildingSelect" aria-describedby="savedHint"><option value="">All Hospital</option></select>
+<div class="building-heading wing-heading"><label for="departmentSelect">WING / DEPARTMENT</label></div>
+<select id="departmentSelect" disabled><option value="">Choose a building first</option></select>
+</section>
   <div class="data-notice" id="dataNotice" role="status" hidden></div>
   <!-- SEARCH + FILTERS -->
   <div class="search-wrap">
@@ -1107,7 +1106,10 @@ a { text-decoration: none; color: inherit; }
 <script>
 'use strict';
 const SPREADSHEET_ID='1yTJtGeebZ_Btzmhy9i3pqbjhrUiJQxW8Ffh2WFOETO8';
-let DEPARTMENTS=['A3','ER','L2'];
+let DEPARTMENTS=[];
+let BUILDINGS=['Main Hospital','KACOLD','East Wing'];
+let UNITS=[{department:'A3',building:'',active:'TRUE'},{department:'ER',building:'',active:'TRUE'},{department:'L2',building:'',active:'TRUE'}];
+const KEY_LOCATION='hospital_directory_location_v3';
 const KEY_CHOICE='hospital_directory_department_v2';
 const KEY_DATA='hospital_directory_verified_data_v2';
 const SEED_UPDATED_AT='2026-10-11T05:38:00Z';
@@ -1159,9 +1161,9 @@ function normalizeRows(rows) {
   return clean.filter(r=>{const k=JSON.stringify([r.id,r.category,r.service,r.extension,r.buildings,r.department,r.room,r.scope]);if(seen.has(k))return false;seen.add(k);return true;});
 }
 let data=[], favorites=new Set(), currentView='all', categoryFilter=null, queryString='', baseSize=11;
-let selectedBuilding='all';
-let selectedDepartment=readStorage(KEY_CHOICE)||readStorage('hospital_directory_design_department_v1')||'';
-if(!DEPARTMENTS.includes(selectedDepartment))selectedDepartment='';
+const savedLocation=parseJSON(readStorage(KEY_LOCATION),{});
+let selectedBuilding=typeof savedLocation?.building==='string'?savedLocation.building:'';
+let selectedDepartment=typeof savedLocation?.department==='string'?savedLocation.department:'';
 let loadState='loading', lastUpdated=0, requestToken=0, activeRequest=null, retryTimer=null;
 const listEl=$('list'), searchEl=$('search'), searchWrap=$('searchWrap'), livePill=$('livePill'), settingsPop=$('settingsPop');
 function locationLabel(r) {
@@ -1179,26 +1181,40 @@ function migrateFavorites() {
   for(const r of data){const old=oldKey(r);if(favorites.has(old) && data.filter(x=>oldKey(x)===old).length===1){favorites.delete(old);favorites.add(makeKey(r));changed=true;}}
   if(changed)writeStorage(KEY_FAV,JSON.stringify([...favorites]));
 }
-function matchesBuilding(r) {
-  if(!selectedDepartment)return false;
-  if(r.scope==='department')return normalizeSearch(r.department)===normalizeSearch(selectedDepartment);
-  return !r.department&&!r.room&&(r.scope==='hospital'||r.scope==='building');
+function isActive(r){return !['false','0','no'].includes(normalizeSearch(r.active));}
+function configuredUnits(){return UNITS.filter(r=>r.department&&r.building&&isActive(r)&&BUILDINGS.some(b=>normalizeSearch(b)===normalizeSearch(r.building)));}
+function effectiveBuilding(r){
+ if(r.building)return r.building;
+ if(r.scope!=='department')return '';
+ const matches=configuredUnits().filter(u=>normalizeSearch(u.department)===normalizeSearch(r.department));
+ return matches.length===1?matches[0].building:'';
+}
+function matchesBuilding(r){
+ if(r.scope==='department')return !!selectedBuilding&&!!selectedDepartment&&normalizeSearch(r.department)===normalizeSearch(selectedDepartment)&&normalizeSearch(effectiveBuilding(r))===normalizeSearch(selectedBuilding);
+ if(r.scope!=='hospital'||r.department||r.room)return false;
+ if(!selectedBuilding||!r.building||r.buildings.includes('shared'))return true;
+ return r.building.split(/[,;|/،]+/).some(b=>normalizeSearch(b)===normalizeSearch(selectedBuilding));
 }
 function scopedRows(){return data.filter(r=>matchesBuilding(r));}
+function persistLocation(){writeStorage(KEY_LOCATION,JSON.stringify({building:selectedBuilding,department:selectedDepartment}));}
 function syncDepartmentControls(){
-  const select=$('departmentSelect');
-  select.innerHTML='<option value="" disabled>Choose a department</option>'+DEPARTMENTS.map(d=>'<option value="'+escapeHtml(d)+'">'+escapeHtml(d)+'</option>').join('');
-  select.value=selectedDepartment;
-  document.querySelector('.department-options').innerHTML=DEPARTMENTS.map(d=>'<button data-department="'+escapeHtml(d)+'">'+escapeHtml(d)+'</button>').join('');
-  $('departmentWelcome').hidden=!!selectedDepartment;
+ const buildings=$('buildingSelect'),select=$('departmentSelect');
+ if(!BUILDINGS.some(b=>normalizeSearch(b)===normalizeSearch(selectedBuilding))){selectedBuilding='';selectedDepartment='';}
+ buildings.innerHTML='<option value="">All Hospital</option>'+BUILDINGS.map(b=>'<option value="'+escapeHtml(b)+'">'+escapeHtml(b)+'</option>').join('');buildings.value=selectedBuilding;
+ const options=[...new Set(configuredUnits().filter(u=>normalizeSearch(u.building)===normalizeSearch(selectedBuilding)).map(u=>u.department))];
+ DEPARTMENTS=options;
+ if(!options.includes(selectedDepartment))selectedDepartment='';
+ select.disabled=!selectedBuilding||!options.length;
+ select.innerHTML='<option value="">'+(!selectedBuilding?'Choose a building first':!options.length?'No wings added yet':'All wings / departments')+'</option>'+options.map(d=>'<option value="'+escapeHtml(d)+'">'+escapeHtml(d)+'</option>').join('');
+ select.value=selectedDepartment;persistLocation();
 }
 let toastTimer;
 function showToast(msg,ok=true){$('toast').innerHTML='<span class="toast-icon'+(ok?'':' error')+'">'+(ok?'✓':'✕')+'</span><span>'+escapeHtml(msg)+'</span>';$('toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('show'),2800);}
 function syncBuildingControls(){
   syncDepartmentControls();
   $('savedHint').textContent=storageOK?'Saved on this device':'Saving unavailable in this browser';
-  searchEl.disabled=!selectedDepartment;
-  searchEl.placeholder=selectedDepartment?'Search '+selectedDepartment+' & hospital services…':'Choose a department to start';
+  searchEl.disabled=false;
+  searchEl.placeholder=selectedDepartment?'Search '+selectedDepartment+' & hospital services…':selectedBuilding?'Search '+selectedBuilding+' services…':'Search hospital service, category or extension…';
 }
 function renderStatus(){
  livePill.hidden=false;livePill.disabled=loadState==='loading';
@@ -1221,7 +1237,6 @@ function renderCategoryChips(){
 function render(){
   syncDepartmentControls();renderStatus();renderRRT();renderCategoryChips();
   const rows=scopedRows();
-  if(!selectedDepartment){listEl.innerHTML='';$('countAll').textContent='0';$('countFav').textContent='0';$('footerCount').textContent='';return;}
   $('countAll').textContent=rows.length;
   $('countFav').textContent=rows.filter(r=>favorites.has(makeKey(r))).length;
   $('chipAll').classList.toggle('active',currentView==='all');$('chipFav').classList.toggle('active',currentView==='fav');
@@ -1243,7 +1258,7 @@ function render(){
     listEl.innerHTML='<div class="empty-state"><div class="ico">'+(failed?'↻':'⌕')+'</div><h3>'+title+'</h3><p>'+description+'</p>'+(failed?'<button class="retry-button" data-action="retry">Try again</button>':'')+'</div>';return;
   }
   const groups=!words.length&&categoryFilter===null;let last=null;const html=[];
-  for(const r of list){if(last!==r.scope){html.push('<div class="section-label scope-heading">'+escapeHtml(r.scope==='department'?selectedDepartment+' · DEPARTMENT':'HOSPITAL SERVICES')+'</div>');last=r.scope;}
+  for(const r of list){if(last!==r.scope){html.push('<div class="section-label scope-heading">'+escapeHtml(r.scope==='department'?selectedDepartment+' · WING / DEPARTMENT':'HOSPITAL SERVICES')+'</div>');last=r.scope;}
     const fav=favorites.has(makeKey(r));
     html.push('<div class="card"><button class="card-fav'+(fav?' active':'')+'" data-key="'+escapeHtml(makeKey(r))+'" aria-label="'+(fav?'Remove':'Add')+' favorite: '+escapeHtml(r.service)+'" aria-pressed="'+fav+'">★</button><div class="card-body"><div class="card-service">'+escapeHtml(r.service)+'</div>'+(groups?'':'<span class="card-category">'+escapeHtml(r.category)+'</span>')+'<span class="location-badge'+(r.scope==='unassigned'?' unassigned':'')+'">'+escapeHtml(locationLabel(r))+'</span></div><span class="card-ext">'+escapeHtml(r.extension)+'</span></div>');
   }
@@ -1272,30 +1287,22 @@ function querySheet(gid,range){
 }
 async function fetchData(){
  const token=++requestToken;loadState='loading';render();
- const results=await Promise.allSettled([querySheet(0,'A:I'),querySheet(701,'A:C')]);
+ const results=await Promise.allSettled([querySheet(0,'A:I'),querySheet(701,'A:C'),querySheet(702,'A:B')]);
  if(token!==requestToken)return;
  try{
-  if(results[0].status!=='fulfilled')throw results[0].reason;
+  if(results.some(r=>r.status!=='fulfilled'))throw new Error('Directory configuration update unavailable');
   const raw=results[0].value;
   if(raw.some(r=>!r.service||!r.extension))throw new Error('A record is missing its name or extension');
   data=normalizeRows(raw);lastUpdated=Date.now();loadState='ready';
-  if(results[1].status==='fulfilled'){
-   const list=[...new Set(results[1].value.filter(r=>r.department&&!['false','0','no'].includes(normalizeSearch(r.active))).map(r=>r.department))];
-   if(list.length)DEPARTMENTS=list;
-  }
-  if(!DEPARTMENTS.includes(selectedDepartment)){selectedDepartment='';writeStorage(KEY_CHOICE,'');}
-  migrateFavorites();writeStorage(KEY_DATA,JSON.stringify({rows:data,departments:DEPARTMENTS,updatedAt:lastUpdated}));
+  if(results[1].status==='fulfilled')UNITS=results[1].value;
+  if(results[2].status==='fulfilled')BUILDINGS=[...new Set(results[2].value.filter(r=>r.building&&isActive(r)).map(r=>r.building))];
+  migrateFavorites();writeStorage(KEY_DATA,JSON.stringify({rows:data,units:UNITS,buildings:BUILDINGS,updatedAt:lastUpdated}));
  }catch(e){loadState='error';}
  syncBuildingControls();render();
 }
-function chooseDepartment(value){
- if(!DEPARTMENTS.includes(value))return;
- selectedDepartment=value;writeStorage(KEY_CHOICE,value);
- categoryFilter=null;queryString='';searchEl.value='';searchWrap.classList.remove('has-text');
- syncBuildingControls();render();listEl.scrollTop=0;
-}
-$('departmentSelect').addEventListener('change',e=>chooseDepartment(e.target.value));
-$('departmentWelcome').addEventListener('click',e=>{const button=e.target.closest('[data-department]');if(button)chooseDepartment(button.dataset.department);});
+function resetFilters(){categoryFilter=null;queryString='';searchEl.value='';searchWrap.classList.remove('has-text');}
+$('buildingSelect').addEventListener('change',e=>{selectedBuilding=e.target.value;selectedDepartment='';resetFilters();syncBuildingControls();render();listEl.scrollTop=0;});
+$('departmentSelect').addEventListener('change',e=>{selectedDepartment=e.target.value;resetFilters();syncBuildingControls();render();listEl.scrollTop=0;});
 $('categoryRow').addEventListener('click',e=>{const b=e.target.closest('[data-cat]');if(b){categoryFilter=b.dataset.cat||null;render();}});
 listEl.addEventListener('click',e=>{if(e.target.closest('[data-action="retry"]')){fetchData();return;}const b=e.target.closest('[data-key]');if(!b)return;const key=b.dataset.key;if(favorites.has(key))favorites.delete(key);else favorites.add(key);if(!writeStorage(KEY_FAV,JSON.stringify([...favorites])))showToast('Favorites could not be saved on this device',false);render();});
 searchEl.addEventListener('input',e=>{queryString=e.target.value.trim();searchWrap.classList.toggle('has-text',!!queryString);render();});
@@ -1316,7 +1323,7 @@ function init(){
  const fav=parseJSON(readStorage(KEY_FAV),[]);favorites=new Set(Array.isArray(fav)?fav:[]);
  data=normalizeRows(SEED_ROWS);lastUpdated=Date.parse(SEED_UPDATED_AT);
  const cached=parseJSON(readStorage(KEY_DATA),null);
- if(cached?.rows&&Number(cached.updatedAt)>lastUpdated){try{data=normalizeRows(cached.rows);lastUpdated=Number(cached.updatedAt);if(Array.isArray(cached.departments)&&cached.departments.length)DEPARTMENTS=cached.departments;}catch(_){}}
+ if(cached?.rows&&Number(cached.updatedAt)>lastUpdated){try{data=normalizeRows(cached.rows);lastUpdated=Number(cached.updatedAt);if(Array.isArray(cached.units))UNITS=cached.units;if(Array.isArray(cached.buildings))BUILDINGS=cached.buildings;}catch(_){}}
  loadState='ready';syncBuildingControls();render();fetchData();
 }
 init();
