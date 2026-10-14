@@ -588,11 +588,14 @@ a { text-decoration: none; color: inherit; }
 }
 .card-category {
   display: inline-block;
-  font-size: 0.64rem;
+  max-width: 100%;
+  font-size: 0.78rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  line-height: 1.45;
+  letter-spacing: 0.03em;
   text-transform: uppercase;
-  color: var(--text-3);
+  overflow-wrap: anywhere;
+  color: var(--text-2);
   background: var(--glass-2);
   border: 1px solid var(--glass-border);
   padding: 2px 8px;
@@ -1317,10 +1320,10 @@ function render(){
     const description=failed?'The data service could not be reached.':!data.length?'The connected sheet returned an empty directory.':currentView==='fav'?'Tap a star to save an entry. Favorites follow the selected department.':selectedBuilding?'Try another name or select All Hospital.':'Try another name, extension or category.';
     listEl.innerHTML='<div class="empty-state"><div class="ico">'+(failed?'↻':'⌕')+'</div><h3>'+title+'</h3><p>'+description+'</p>'+(failed?'<button class="retry-button" data-action="retry">Try again</button>':'')+'</div>';return;
   }
-  const groups=!words.length&&categoryFilter===null;let last=null;const html=[];
+  let last=null;const html=[];
   for(const r of list){if(last!==r.scope){html.push('<div class="section-label scope-heading">'+escapeHtml(r.scope==='department'?selectedDepartment+' · WING / DEPARTMENT':'HOSPITAL SERVICES')+'</div>');last=r.scope;}
     const fav=favorites.has(makeKey(r));
-    html.push('<div class="card"><button class="card-fav'+(fav?' active':'')+'" data-key="'+escapeHtml(makeKey(r))+'" aria-label="'+(fav?'Remove':'Add')+' favorite: '+escapeHtml(r.service)+'" aria-pressed="'+fav+'">★</button><div class="card-body"><div class="card-service">'+escapeHtml(r.service)+'</div>'+(groups?'':'<span class="card-category">'+escapeHtml(r.category)+'</span>')+'<span class="location-badge'+(r.scope==='unassigned'?' unassigned':'')+'">'+escapeHtml(locationLabel(r))+'</span></div><span class="card-ext">'+escapeHtml(r.extension)+'</span></div>');
+    html.push('<div class="card"><button class="card-fav'+(fav?' active':'')+'" data-key="'+escapeHtml(makeKey(r))+'" aria-label="'+(fav?'Remove':'Add')+' favorite: '+escapeHtml(r.service)+'" aria-pressed="'+fav+'">★</button><div class="card-body"><div class="card-service">'+escapeHtml(r.service)+'</div><span class="card-category">'+escapeHtml(r.category)+'</span><span class="location-badge'+(r.scope==='unassigned'?' unassigned':'')+'">'+escapeHtml(locationLabel(r))+'</span></div><span class="card-ext">'+escapeHtml(r.extension)+'</span></div>');
   }
   listEl.innerHTML=html.join('');
 }
